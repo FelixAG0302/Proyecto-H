@@ -2,9 +2,9 @@
 
 public class Category
 {
-    public int CategoryId { get; set; }
+    public int Id { get; set; }
     public string Name { get; set; }
-    public string color { get; set; } = "#4A90E2";
+    public string Color { get; set; } = "#4A90E2";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     
     // Foreign Key

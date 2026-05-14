@@ -20,7 +20,7 @@ public class TaskItem
     public bool IsCompleted { get; set; } = false;
     public DateTime? CompletedAt { get; set; } = null;
     public TaskType Type { get; set; } = TaskType.Dialy;
-    public DateTime DueDate { get; set; }
+    public DateTime? DueDate { get; set; }
     public TimeOnly? StartTime { get; set; }
     public TimeOnly? EndTime { get; set; }
     public TaskPriority Priority { get; set; } = TaskPriority.Low;

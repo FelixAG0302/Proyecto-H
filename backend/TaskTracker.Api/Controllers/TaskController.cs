@@ -63,4 +63,42 @@ public class TaskController : ControllerBase
         return Ok();
     }
 
+    [HttpDelete("{id}/complete")]
+    public async Task<IActionResult> DeleteTask(int id)
+    {
+        var task = _context.Tasks.FirstOrDefaultAsync(t => t.Id == id);
+        
+        if (task == null) return NotFound(new {Message ="Task Not Found"});
+        
+        _context.Remove(task);
+        _context.SaveChanges();
+
+        return Ok(new {message = "Task Deleted"});
+    }
 }
+
+public record TaskItemDto(
+    int Id,
+    string Title,
+    string? Description,
+    bool IsCompleted,
+    DateTime? CompletedAt,
+    string Type,
+    DateTime? DueDate,
+    TimeOnly? StartTime,
+    TimeOnly? EndTime,
+    string Priority,
+    int CategoryId,
+    string CategoryName,
+    string CategoryColor
+    );
+
+public record CreateTaskItemDto(
+    string Title,
+    string? Description,
+    string Type,
+    DateTime? DueDate,
+    TimeOnly? StartTime,
+    TimeOnly? EndTime,
+    string? Priority,
+    int CategoryId);
