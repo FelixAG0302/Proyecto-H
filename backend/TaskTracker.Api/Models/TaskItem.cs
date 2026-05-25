@@ -2,7 +2,7 @@
 
 public enum TaskType
 {
-    Dialy,
+    Daily,
     Scheduled
 }
 
@@ -19,7 +19,7 @@ public class TaskItem
     public string Title { get; set; } = string.Empty;
     public bool IsCompleted { get; set; } = false;
     public DateTime? CompletedAt { get; set; } = null;
-    public TaskType Type { get; set; } = TaskType.Dialy;
+    public TaskType Type { get; set; } = TaskType.Daily;
     public DateTime? DueDate { get; set; }
     public TimeOnly? StartTime { get; set; }
     public TimeOnly? EndTime { get; set; }
