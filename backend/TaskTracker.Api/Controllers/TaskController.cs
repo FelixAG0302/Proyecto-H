@@ -148,7 +148,7 @@ public class TaskController : ControllerBase
         if (task.IsCompleted) return BadRequest(new { message = "The task is already complete" });
 
         task.IsCompleted = true;
-        task.CompletedAt = DateTime.Now;
+        task.CompletedAt = DateTime.UtcNow;
         
         await _context.SaveChangesAsync();
 
@@ -157,7 +157,7 @@ public class TaskController : ControllerBase
         return Ok(new {task.Id, task.IsCompleted, task.CompletedAt});
     }
 
-    [HttpDelete("{id}/complete")]
+    [HttpDelete]
     public async Task<IActionResult> Delete(int id)
     {
         var userId = GetUserId();
