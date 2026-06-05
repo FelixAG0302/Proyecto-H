@@ -48,5 +48,6 @@ app-example
 /ios
 /android
 
+#bin and obj files
 bin/
 obj/

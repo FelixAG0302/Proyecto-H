@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using TaskTracker.Api.Data;
+using TaskTracker.Api.Repositories.Interfaces;
 
 namespace TaskTracker.Api.Controllers;
 
@@ -12,11 +13,11 @@ namespace TaskTracker.Api.Controllers;
 [Authorize]
 public class StreakController : Controller
 {
-    private readonly AppDbContext _context;
+    private readonly IStreakRepository _repository;
 
-    public StreakController(AppDbContext context)
+    public StreakController(IStreakRepository repository)
     {
-        _context = context;
+        _repository = repository;
     }
 
     private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -24,29 +25,16 @@ public class StreakController : Controller
     [HttpGet]
     public async Task<IActionResult> Get()
     {
-        var userId = GetUserId();
+       var streak = await _repository.GetByUserAsync(GetUserId());
+       if (streak == null) return NotFound(new {message = "The User Streak Was Not Found"});
         
-        var streak = await _context.Streaks.FirstOrDefaultAsync(s => s.UserId == userId);
-
-        if (streak == null) return NotFound(new {message = "The User Streak Was Not Found"});
-        
-        return Ok(new StreakDto(streak.CurrentStreak, streak.LongestStreak, streak.LastActivityDate));
+       return Ok(new StreakDto(streak.CurrentStreak, streak.LongestStreak, streak.LastActivityDate));
     }
 
     [HttpPost("reset")]
     public async Task<IActionResult> Reset()
     {
-        var userId = GetUserId();
-        
-        var streak = await _context.Streaks.FirstOrDefaultAsync(s => s.UserId == userId);
-        
-        if (streak == null) return NotFound(new {message = "The User Streak Was Not Found"});
-        
-        streak.CurrentStreak = 0;
-        streak.LastActivityDate = DateOnly.FromDateTime(DateTime.UtcNow);
-        
-        await _context.SaveChangesAsync();
-
+        await _repository.ResetAsync(GetUserId());
         return Ok(new {message = "The User Streak Was Successfully Reset"});
     }
 }

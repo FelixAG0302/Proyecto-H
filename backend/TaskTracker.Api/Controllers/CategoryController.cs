@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using TaskTracker.Api.Data;
 using TaskTracker.Api.Models;
 using System.Linq;
+using TaskTracker.Api.Repositories.Interfaces;
 
 namespace TaskTracker.Api.Controllers;
 
@@ -13,11 +14,11 @@ namespace TaskTracker.Api.Controllers;
 [Authorize]
 public class CategoryController : ControllerBase
 {
-    private readonly AppDbContext _context;
+    private readonly ICategoryRepository _repository;
 
-    public CategoryController(AppDbContext context)
+    public CategoryController(ICategoryRepository repository)
     {
-        _context = context;
+        _repository = repository;
     }
     
     // Helper method
@@ -27,19 +28,8 @@ public class CategoryController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var userId = GetUserId();
-
-        var category = await _context.Categories
-            .Where(c => c.UserId == userId)
-            .ToListAsync();
-
-        var result = category.Select(c => new CategoryDto(
-            c.UserId,
-            c.Name,
-            c.Color
-            ));
-
-        return Ok(category);
+        var categories = await _repository.GetAllByUserAsync(GetUserId());
+        return Ok(categories.Select(c => new CategoryDto(c.Id, c.Name, c.Color)));
     }
 
     // GET api/category
@@ -48,76 +38,57 @@ public class CategoryController : ControllerBase
     {
         var userId = GetUserId();
         
-        var category = await _context.Categories
-            .Where(c => c.Id == id && c.UserId == userId)
-            .Select( c => new CategoryDto(c.UserId, c.Name, c.Color))
-            .FirstOrDefaultAsync();
-        
+        var category = await _repository.GetByIdAsync(id, userId);
         if (category == null) return NotFound(new {message = "Category not found."});
-
-        return Ok(category);
+        
+        return Ok(new CategoryDto(category.Id, category.Name, category.Color));
     }
     
     // POST api/category
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateCategoryDto dto)
     {
-        var userId = GetUserId();
 
         var category = new Category
         {
             Name = dto.Name,
-            Color = dto.Color,
-            UserId = userId
+            Color = dto.Color ?? "#4A90E2",
+            UserId = GetUserId()
         };
         
-        _context.Categories.Add(category);
-        await _context.SaveChangesAsync();
-
-        return CreatedAtAction(
-            nameof(GetById),
-            new { id = category.Id },
-            new CategoryDto(category.Id, category.Name, category.Color)
-            );
+        var created = await _repository.CreateAsync(category);
+        if (created == null) return StatusCode(500, new {message = "Category not found."});
+        
+        return CreatedAtAction(nameof(GetById), new { id = created.Id }, new CategoryDto(created.Id, category.Name, category.Color));
     }
     
     // PUT api/category/
     [HttpPut("{id}")]
     public async Task<IActionResult> Update(int id, [FromBody] CreateCategoryDto dto)
     {
-        var userId = GetUserId();
+        var updated = new Category
+        {
+            Name = dto.Name,
+            Color = dto.Color ?? "#4A90E2"
+        };
 
-        var category = await _context.Categories
-            .FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId);
+        var result = await _repository.UpdateAsync(id, GetUserId(), updated);
+        if (result == null) return NotFound(new {message = "Category not found."});
         
-        if (category == null) return NotFound( new {message = "Category not found."});
-        
-        category.Name = dto.Name;
-        category.Color = dto.Color ?? category.Color;
-
-        await _context.SaveChangesAsync();
-        
-        return Ok(new CategoryDto(category.Id, category.Name, category.Color));
+        return Ok(new CategoryDto(result.Id, result.Name, result.Color));
     }
     
     // DELETE api/category/
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var userId = GetUserId();
-
-        var category = await _context.Categories
-            .FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId);
+        var deleted = await _repository.DeleteAsync(id, GetUserId());
         
-        if (category == null) return NotFound(new {message = "Category not found."});
-
-        _context.Categories.Remove(category);
-        _context.SaveChanges();
-
-        return Ok(category);
+        if (!deleted) return NotFound(new {message = "Category not found."});
+        
+        return Ok(new {message = "Category deleted."});
     }
-    
 }
 
-public record CategoryDto(int UserId, string Name, string? Color);
+public record CategoryDto(int Id, string Name, string? Color);
 public record CreateCategoryDto(string Name, string? Color);

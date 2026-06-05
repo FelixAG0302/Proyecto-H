@@ -1,48 +1,39 @@
 ﻿using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TaskTracker.Api.Data;
 using TaskTracker.Api.Models;
+using TaskTracker.Api.Repositories;
+using TaskTracker.Api.Repositories.Interfaces;
+using TaskTracker.Api.Services;
 
 namespace TaskTracker.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class TaskController : ControllerBase
 {
-    private readonly AppDbContext _context;
+    private readonly ITaskItemRepository _taskRepository;
+    private readonly ICategoryRepository _categoryRepository;
+    private readonly StreakService _streakService;
 
-    public TaskController(AppDbContext context)
+    public TaskController(ITaskItemRepository taskRepository, ICategoryRepository categoryRepository, StreakService streakService)
     {
-        _context = context;
+        _taskRepository = taskRepository;
+        _categoryRepository = categoryRepository;
+        _streakService = streakService;
     }
 
     private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
     [HttpGet("daily")]
-    public async Task<IActionResult> GetDaily()
+    public async Task<IActionResult> GetDaily(int userId)
     {
-        var userId = GetUserId();
-
-        var tasks = await _context.Tasks
-            .Where(t => t.UserId == userId && t.Type == TaskType.Daily)
-            .Include(t => t.Category)
-            .Select(t => new TaskItemDto(
-                t.Id,
-                t.Title,
-                t.IsCompleted,
-                t.CompletedAt,
-                t.Type.ToString(),
-                t.DueDate,
-                t.StartTime,
-                t.EndTime,
-                t.Priority.ToString(),
-                t.CategoryId,
-                t.Category.Name,
-                t.Category.Color
-            )).ToListAsync();
+        var tasks = await _taskRepository.GetDailyByUserAsync(GetUserId());
         
-        return Ok(tasks);
+        return Ok(tasks.Select(ToDto));
     }
 
     [HttpGet("Scheduled")]
@@ -50,32 +41,9 @@ public class TaskController : ControllerBase
         [FromQuery] DateOnly from,
         [FromQuery] DateOnly to)
     {
-        var userId = GetUserId();
-        
-        var tasks = await _context.Tasks
-            .Where(t => t.UserId == userId 
-                            && t.Type == TaskType.Scheduled
-                            && t.DueDate.HasValue
-                            && DateOnly.FromDateTime(t.DueDate.Value) >= from 
-                            && DateOnly.FromDateTime(t.DueDate.Value) <= to
-                            ).Include(t => t.Category)
-            .Select(t => new TaskItemDto(
-                t.Id,
-                t.Title,
-                t.IsCompleted,
-                t.CompletedAt,
-                t.Type.ToString(),
-                t.DueDate,
-                t.StartTime,
-                t.EndTime,
-                t.Priority.ToString(),
-                t.CategoryId,
-                t.Category.Name,
-                t.Category.Color
-            ))
-            .ToListAsync();
+        var tasks = await _taskRepository.GetScheduledByUserAsync(GetUserId(), from, to);
 
-        return Ok(tasks);
+        return Ok(tasks.Select(ToDto));
     }
 
     [HttpPost]
@@ -83,13 +51,12 @@ public class TaskController : ControllerBase
     {
         var userId = GetUserId();
         
-        var categoryExists = await _context.Categories.AnyAsync(c => c.Id == dto.CategoryId && c.UserId == userId);
-
-        if (!categoryExists) return BadRequest(new { message = "Category Not Valid" });
+        var categoryExists = await _categoryRepository.ExistsAsync(dto.CategoryId, userId);
+        if (!categoryExists) return NotFound(new {message = "Category Not Found"});
 
         if (dto.Type == "Scheduled" && dto.DueDate == null)
-            return BadRequest(new { message = "A Scheduled Task Must Have a Due Date" });
-        
+            return BadRequest(new { message = "A scheduled task needs a due date" });
+
         var task = new TaskItem
         {
             Title = dto.Title,
@@ -101,105 +68,61 @@ public class TaskController : ControllerBase
             CategoryId = dto.CategoryId,
             UserId = userId
         };
-        
-        _context.Tasks.Add(task);
-        await _context.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(GetById), new {id = task.Id}, new {task.Id, task.Title, task.Type});
+        var created = await _taskRepository.CreateAsync(task);
+        return CreatedAtAction(nameof(GetById),
+            new {id = created.Id }, new {created.Id, created.Title, created.Type});
     }
     
     [HttpGet("{id}")]
     public async Task<ActionResult> GetById(int id)
     {
-        var userId = GetUserId();
-
-        var task = await _context.Tasks.Where(t => t.Id == id && t.UserId == userId)
-            .Include(t => t.Category)
-            .Select(t => new TaskItemDto(
-                t.Id,
-                t.Title,
-                t.IsCompleted,
-                t.CompletedAt,
-                t.Type.ToString(),
-                t.DueDate,
-                t.StartTime,
-                t.EndTime,
-                t.Priority.ToString(),
-                t.CategoryId,
-                t.Category.Name,
-                t.Category.Color))
-            .FirstOrDefaultAsync();
-
-        if (task == null) return NotFound(new { message = "Task Not Found" });
-
-        return Ok(task);
+        var task = await _taskRepository.GetByIdAsync(id, GetUserId());
+        if (task == null) return NotFound(new {message = "Task Not Found"});
+        
+        return Ok(ToDto(task));
     }
 
-    [HttpPut("{id}/complete")]
+    [HttpPatch("{id}/complete")]
     public async Task<ActionResult<TaskItem>> Complete(int id)
     {
-
         var userId = GetUserId();
+        var task = await _taskRepository.CompleteAsync(id, userId);
         
-        var task = await _context.Tasks.FirstOrDefaultAsync((t => t.Id == id && t.UserId == userId ));
+        if (task == null) return NotFound(new {message = "Task Not Found"});
 
-        if (task == null) return NotFound(new { message = "The Task Was Not Found" });
-
-        if (task.IsCompleted) return BadRequest(new { message = "The task is already complete" });
-
-        task.IsCompleted = true;
-        task.CompletedAt = DateTime.UtcNow;
-        
-        await _context.SaveChangesAsync();
-
-        await UpdateStreak(userId);
+        await _streakService.UpdateStreakAsync(userId);
 
         return Ok(new {task.Id, task.IsCompleted, task.CompletedAt});
     }
 
-    [HttpDelete]
+    [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var userId = GetUserId();
+        var deleted = await _taskRepository.DeleteAsync(id, GetUserId());
+        if (!deleted) return NotFound(new {message = "Task Not Found"});
         
-        var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id &&  t.UserId == userId);
-        
-        if (task == null) return NotFound(new {Message ="Task Not Found"});
-        
-        _context.Remove(task);
-        await _context.SaveChangesAsync();
-
         return NoContent();
     }
-    
-    // Update the user streak - is executed when aa task is completed for the first time in the day
-    private async Task UpdateStreak(int userId)
-    {
-        var streak = await _context.Streaks.FirstOrDefaultAsync(s => s.UserId == userId);
 
-        if (streak == null) return;
-        
-        var today = DateOnly.FromDateTime(DateTime.Now);
-
-        if (streak.LastActivityDate == today) return;
-
-        if (streak.LastActivityDate == today.AddDays(-1))
-        {
-            streak.CurrentStreak++;
-        }
-        else
-        {
-            streak.CurrentStreak = 1;
-        }
-        
-        if (streak.CurrentStreak > streak.LongestStreak) streak.LongestStreak = streak.CurrentStreak;
-        
-        streak.LastActivityDate = today;
-
-        await _context.SaveChangesAsync();
-    }
+    //Helper method for mapp TaskItem to TaskItemDito
+    private static TaskItemDto ToDto(TaskItem t) => new(
+        t.Id,
+        t.Title,
+        t.IsCompleted,
+        t.CompletedAt,
+        t.Type.ToString(),
+        t.DueDate,
+        t.StartTime,
+        t.EndTime,
+        t.Priority.ToString(),
+        t.CategoryId,
+        t.Category?.Name ?? "Without Category",
+        t.Category?.Color ?? "#4A90E2"
+    );
 }
 
+// Dtos
 public record TaskItemDto(
     int Id,
     string Title,
